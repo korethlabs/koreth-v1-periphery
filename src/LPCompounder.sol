@@ -1,0 +1,153 @@
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity ^0.8.26;
+
+import {ILPAdapter} from "@koreth/v1-core/src/interfaces/ILPAdapter.sol";
+import {IPositionManager} from "@koreth/v1-core/src/interfaces/IPositionManager.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ProtocolCore} from "@koreth/v1-core/src/core/ProtocolCore.sol";
+import {PositionManager} from "@koreth/v1-core/src/core/PositionManager.sol";
+import {FeeCollector} from "@koreth/v1-core/src/core/FeeCollector.sol";
+
+/// @title LPCompounder
+/// @notice Permissionless auto-compound for Uniswap V3 LP positions
+/// @dev Anyone can compound any V3 position. Configurable fee split (default 2.5%):
+///      - compoundFeeBps - callerRewardBps → FeeCollector (protocol revenue)
+///      - callerRewardBps → caller (reward for gas)
+///      - remainder → reinvested as liquidity
+///      V2/Curve positions auto-compound natively — no action needed.
+contract LPCompounder {
+    using SafeERC20 for IERC20;
+
+    ProtocolCore public immutable core;
+    PositionManager public immutable positionManager;
+    FeeCollector public immutable feeCollector;
+
+    /// @notice Total fee on compounded fees (basis points). Default 250 = 2.5%.
+    uint256 public compoundFeeBps = 250;
+    /// @notice Caller reward portion (basis points). Default 50 = 0.5%.
+    uint256 public callerRewardBps = 50;
+    /// @dev Must not exceed PositionManager.MAX_COMPOUND_FEE_BPS (5%): compoundPosition forwards
+    ///      the full compoundFeeBps as the total fee to compoundFees, which reverts above that cap.
+    uint256 public constant MAX_COMPOUND_FEE = 500; // 5% max total
+
+    /// @notice Minimum fee per token to justify compounding
+    uint256 public minCompoundThreshold = 1000;
+    /// @notice Maximum slippage on reinvestment (basis points). Default 200 = 2%.
+    uint256 public compoundSlippageBps = 200;
+
+    event FeesCompounded(
+        uint256 indexed positionId,
+        uint256 fees0,
+        uint256 fees1,
+        uint256 addedLiquidity,
+        address indexed rewardRecipient
+    );
+    event CompoundFeeUpdated(uint256 oldTotal, uint256 newTotal, uint256 oldCaller, uint256 newCaller);
+    event MinCompoundThresholdUpdated(uint256 oldValue, uint256 newValue);
+    event TokensSwept(address indexed token, address indexed to, uint256 amount);
+    event CompoundFailed(uint256 indexed positionId, bytes reason);
+    event CompoundSlippageUpdated(uint256 oldValue, uint256 newValue);
+
+    constructor(address _core, address _positionManager, address _feeCollector) {
+        require(_core != address(0) && _positionManager != address(0) && _feeCollector != address(0), "ZERO_ADDRESS");
+        core = ProtocolCore(_core);
+        positionManager = PositionManager(_positionManager);
+        feeCollector = FeeCollector(_feeCollector);
+    }
+
+    /// @notice Compound fees for a V3 position — permissionless
+    /// @param positionId The position to compound
+    /// @param rewardRecipient Where to send the caller reward (callerRewardBps)
+    function compoundPosition(uint256 positionId, address rewardRecipient) public {
+        PositionManager.Position memory pos = positionManager.getPosition(positionId);
+        require(pos.owner != address(0), "POSITION_NOT_FOUND");
+
+        // Only UniswapV3 positions (stub adapters revert, so only check real V3)
+        require(pos.lpType == ILPAdapter.LPType.UniswapV3, "UNSUPPORTED_LP_TYPE");
+
+        // Calculate fee split
+        uint256 protocolFeeBps = compoundFeeBps > callerRewardBps ? compoundFeeBps - callerRewardBps : 0;
+
+        // Compound via PositionManager (which has adapter access)
+        // Threshold check is inside compoundFees — reverts if below minCompoundThreshold
+        (uint256 fees0, uint256 fees1, uint256 addedLiquidity) = positionManager.compoundFees(
+            IPositionManager.CompoundFeesParams({
+                positionId: positionId,
+                protocolFeeRecipient: address(feeCollector),
+                protocolFeeBps: protocolFeeBps,
+                callerRewardRecipient: rewardRecipient,
+                callerRewardBps: callerRewardBps,
+                minFeeThreshold: minCompoundThreshold,
+                dustRefundTo: pos.owner,
+                maxSlippageBps: compoundSlippageBps
+            })
+        );
+
+        // Skip if no fees collected (no revert — graceful for batch)
+        if (fees0 == 0 && fees1 == 0) return;
+
+        emit FeesCompounded(positionId, fees0, fees1, addedLiquidity, rewardRecipient);
+    }
+
+    /// @notice Compound a single position (convenience — reward goes to msg.sender)
+    function compoundPosition(uint256 positionId) external {
+        compoundPosition(positionId, msg.sender);
+    }
+
+    /// @notice Batch compound multiple positions — reward goes to msg.sender
+    /// @dev Failures skipped with CompoundFailed event — one bad position doesn't block others.
+    function batchCompound(uint256[] calldata positionIds) external {
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            try this.compoundPosition(positionIds[i], msg.sender) {}
+            catch (bytes memory reason) {
+                emit CompoundFailed(positionIds[i], reason);
+            }
+        }
+    }
+
+    // --- Admin ---
+
+    /// @notice Set compound fee split (total and caller portion)
+    function setCompoundFee(uint256 _totalBps, uint256 _callerBps) external {
+        require(
+            core.aclManager().isRiskAdmin(msg.sender) || core.aclManager().isPoolAdmin(msg.sender), "NOT_AUTHORIZED"
+        );
+        require(_totalBps <= MAX_COMPOUND_FEE, "FEE_TOO_HIGH");
+        require(_callerBps <= _totalBps, "CALLER_EXCEEDS_TOTAL");
+        emit CompoundFeeUpdated(compoundFeeBps, _totalBps, callerRewardBps, _callerBps);
+        compoundFeeBps = _totalBps;
+        callerRewardBps = _callerBps;
+    }
+
+    /// @notice Set minimum fee threshold
+    function setMinCompoundThreshold(uint256 _threshold) external {
+        require(
+            core.aclManager().isRiskAdmin(msg.sender) || core.aclManager().isPoolAdmin(msg.sender), "NOT_AUTHORIZED"
+        );
+        emit MinCompoundThresholdUpdated(minCompoundThreshold, _threshold);
+        minCompoundThreshold = _threshold;
+    }
+
+    /// @notice Set max slippage on compound reinvestment
+    function setCompoundSlippage(uint256 _bps) external {
+        require(
+            core.aclManager().isRiskAdmin(msg.sender) || core.aclManager().isPoolAdmin(msg.sender), "NOT_AUTHORIZED"
+        );
+        require(_bps <= 1000, "SLIPPAGE_TOO_HIGH"); // max 10%
+        emit CompoundSlippageUpdated(compoundSlippageBps, _bps);
+        compoundSlippageBps = _bps;
+    }
+
+    /// @notice Sweep stuck tokens
+    function sweepTokens(address token, address to, uint256 amount) external {
+        require(core.aclManager().isPoolAdmin(msg.sender), "NOT_POOL_ADMIN");
+        require(token != address(0) && to != address(0), "ZERO_ADDRESS");
+        require(amount > 0, "ZERO_AMOUNT");
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        uint256 sweepAmount = amount > balance ? balance : amount;
+        require(sweepAmount > 0, "NO_BALANCE");
+        IERC20(token).safeTransfer(to, sweepAmount);
+        emit TokensSwept(token, to, sweepAmount);
+    }
+}
