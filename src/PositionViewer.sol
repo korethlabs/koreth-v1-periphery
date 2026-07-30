@@ -3,8 +3,10 @@ pragma solidity ^0.8.26;
 
 import {PositionManager} from "@koreth/v1-core/src/core/PositionManager.sol";
 import {LendingEngine} from "@koreth/v1-core/src/core/LendingEngine.sol";
-import {IMarket} from "@koreth/v1-core/src/interfaces/IMarket.sol";
+import {ILendingPool} from "@koreth/v1-core/src/interfaces/ILendingPool.sol";
+import {ILPAdapter} from "@koreth/v1-core/src/interfaces/ILPAdapter.sol";
 import {ProtocolCore} from "@koreth/v1-core/src/core/ProtocolCore.sol";
+import {RiskManager} from "@koreth/v1-core/src/security/RiskManager.sol";
 
 /// @title PositionViewer
 /// @notice Read-only view functions for the frontend — batch queries for gas efficiency
@@ -28,16 +30,30 @@ contract PositionViewer {
         uint256 availableToBorrow;
     }
 
-    struct MarketView {
-        uint256 id;
-        uint8 lpType;
+    /// @dev Liquidity only. A pool is shared by every collateral type, so it has no lpType and no
+    ///      LTV of its own — those moved to CollateralTypeView.
+    struct PoolView {
         address borrowAsset;
+        address pool;
         uint256 totalSupply;
         uint256 totalBorrow;
         uint256 utilization;
         uint256 supplyRateAPR;
         uint256 borrowRateAPR;
+    }
+
+    /// @dev Risk params, keyed by collateral type. Orthogonal to the pool: one collateral type can
+    ///      back borrows from several pools, and `borrowCap`/`currentBorrows` are USD figures
+    ///      aggregated across all of them.
+    struct CollateralTypeView {
+        uint8 lpType;
         uint256 maxLtv;
+        uint256 liquidationThreshold;
+        uint256 liquidationBonus;
+        uint256 haircut;
+        uint256 borrowCap;
+        uint256 currentBorrows;
+        bool enabled;
     }
 
     constructor(address _core, address _positionManager, address _lendingEngine) {
@@ -82,23 +98,37 @@ contract PositionViewer {
         });
     }
 
-    /// @notice Get market overview data
-    function getMarketView(uint256 marketId) external view returns (MarketView memory) {
-        address marketAddr = core.markets(marketId);
-        IMarket market = IMarket(marketAddr);
-        IMarket.MarketConfig memory config = market.getConfig();
-        IMarket.MarketState memory state = market.getMarketState();
+    /// @notice Get liquidity overview for the shared pool of a borrow asset
+    function getPoolView(address borrowAsset) external view returns (PoolView memory) {
+        address poolAddr = core.pools(borrowAsset);
+        require(poolAddr != address(0), "POOL_NOT_FOUND");
+        ILendingPool.PoolState memory state = ILendingPool(poolAddr).getPoolState();
 
-        return MarketView({
-            id: marketId,
-            lpType: uint8(config.lpType),
-            borrowAsset: config.borrowAsset,
+        return PoolView({
+            borrowAsset: borrowAsset,
+            pool: poolAddr,
             totalSupply: state.totalSupply,
             totalBorrow: state.totalBorrow,
             utilization: state.utilization,
             supplyRateAPR: state.supplyRate,
-            borrowRateAPR: state.borrowRate,
-            maxLtv: config.maxLtv
+            borrowRateAPR: state.borrowRate
+        });
+    }
+
+    /// @notice Get risk params and current exposure for a collateral type
+    function getCollateralTypeView(ILPAdapter.LPType lpType) external view returns (CollateralTypeView memory) {
+        RiskManager riskManager = RiskManager(core.riskManagerAddr());
+        RiskManager.CollateralConfig memory cfg = riskManager.getCollateralConfig(lpType);
+
+        return CollateralTypeView({
+            lpType: uint8(lpType),
+            maxLtv: cfg.maxLtv,
+            liquidationThreshold: cfg.liquidationThreshold,
+            liquidationBonus: cfg.liquidationBonus,
+            haircut: cfg.haircut,
+            borrowCap: cfg.borrowCap,
+            currentBorrows: riskManager.lpTypeCurrentBorrows(lpType),
+            enabled: cfg.enabled
         });
     }
 }

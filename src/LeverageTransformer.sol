@@ -13,7 +13,6 @@ import {ProtocolCore} from "@koreth/v1-core/src/core/ProtocolCore.sol";
 import {PositionManager} from "@koreth/v1-core/src/core/PositionManager.sol";
 import {LendingEngine} from "@koreth/v1-core/src/core/LendingEngine.sol";
 import {IPositionManager} from "@koreth/v1-core/src/interfaces/IPositionManager.sol";
-import {IMarket} from "@koreth/v1-core/src/interfaces/IMarket.sol";
 
 /// @title LeverageTransformer
 /// @notice One-click leverage/deleverage for LP positions via flash loans.
@@ -123,15 +122,12 @@ contract LeverageTransformer is IUniswapV3FlashCallback {
         require(params.swap0Portion <= 10_000, "INVALID_PORTION");
 
         IPositionManager.Position memory pos = positionManager.getPosition(params.positionId);
-        address marketAddr = core.markets(pos.marketId);
-        IMarket.MarketConfig memory config = IMarket(marketAddr).getConfig();
-
-        _validateFlashPool(params.flashLoanPool, config.borrowAsset);
+        _validateFlashPool(params.flashLoanPool, pos.borrowAsset);
 
         FlashContext memory ctx = FlashContext({
             isLeverageUp: true,
             positionId: params.positionId,
-            borrowAsset: config.borrowAsset,
+            borrowAsset: pos.borrowAsset,
             token0: pos.token0,
             token1: pos.token1,
             positionOwner: pos.owner,
@@ -144,7 +140,7 @@ contract LeverageTransformer is IUniswapV3FlashCallback {
             minSwapOut1: params.minSwapOut1
         });
 
-        _executeFlash(params.flashLoanPool, params.flashAmount, config.borrowAsset, ctx);
+        _executeFlash(params.flashLoanPool, params.flashAmount, pos.borrowAsset, ctx);
     }
 
     /// @notice Decrease leverage — called by PositionManager.transform()
@@ -155,15 +151,12 @@ contract LeverageTransformer is IUniswapV3FlashCallback {
         require(params.liquidityToRemove > 0, "ZERO_LIQUIDITY");
 
         IPositionManager.Position memory pos = positionManager.getPosition(params.positionId);
-        address marketAddr = core.markets(pos.marketId);
-        IMarket.MarketConfig memory config = IMarket(marketAddr).getConfig();
-
-        _validateFlashPool(params.flashLoanPool, config.borrowAsset);
+        _validateFlashPool(params.flashLoanPool, pos.borrowAsset);
 
         FlashContext memory ctx = FlashContext({
             isLeverageUp: false,
             positionId: params.positionId,
-            borrowAsset: config.borrowAsset,
+            borrowAsset: pos.borrowAsset,
             token0: pos.token0,
             token1: pos.token1,
             positionOwner: pos.owner,
@@ -176,7 +169,7 @@ contract LeverageTransformer is IUniswapV3FlashCallback {
             minSwapOut1: params.minSwapOut1
         });
 
-        _executeFlash(params.flashLoanPool, params.flashAmount, config.borrowAsset, ctx);
+        _executeFlash(params.flashLoanPool, params.flashAmount, pos.borrowAsset, ctx);
     }
 
     /// @inheritdoc IUniswapV3FlashCallback
@@ -294,10 +287,9 @@ contract LeverageTransformer is IUniswapV3FlashCallback {
     function _handleLeverageDown(FlashContext memory ctx, uint256 flashFee) internal {
         uint256 flashBalance = IERC20(ctx.borrowAsset).balanceOf(address(this));
 
-        // Step 1: Repay debt — approve the Market (Market.transferIn pulls from payer)
+        // Step 1: Repay debt — approve the pool (LendingPool.transferIn pulls from payer)
         IPositionManager.Position memory pos = positionManager.getPosition(ctx.positionId);
-        address marketAddr = core.markets(pos.marketId);
-        IERC20(ctx.borrowAsset).forceApprove(marketAddr, ctx.repayAmount);
+        IERC20(ctx.borrowAsset).forceApprove(core.pools(pos.borrowAsset), ctx.repayAmount);
         lendingEngine.repay(ctx.positionId, ctx.repayAmount);
 
         // Step 2: Remove collateral — now possible because debt is lower (HF improved)

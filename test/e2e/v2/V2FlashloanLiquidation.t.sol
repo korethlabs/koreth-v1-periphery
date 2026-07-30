@@ -11,24 +11,16 @@ import {IPositionManager} from "@koreth/v1-core/src/interfaces/IPositionManager.
 contract V2FlashloanLiquidation is E2EBase {
     FlashloanLiquidator public flashLiquidator;
     address public flashPool;
-    uint256 public v2MarketId;
 
     function setUp() public override {
         super.setUp();
 
-        // Create a V2 market (the default ethUsdcMarketId is V3)
-        vm.startPrank(deployer);
-        (v2MarketId,) = marketFactory.createMarket(
-            ILPAdapter.LPType.UniswapV2, Constants.USDC, 6500, 7500, 500, 10_000_000e6, 0, 0, "volatile"
-        );
-        vm.stopPrank();
-
-        // Fund Bob with extra USDC and supply to V2 market
+        // No V2-specific pool to create: the USDC pool is shared across collateral types, and
+        // ForkTestBase already whitelists UniswapV2 collateral. Just deepen the pool's liquidity.
         _fundUsdc(bob, 50_000e6);
-        address v2MarketAddr = core.markets(v2MarketId);
         vm.startPrank(bob);
-        IERC20(Constants.USDC).approve(v2MarketAddr, 50_000e6);
-        IMarket(v2MarketAddr).supply(50_000e6);
+        IERC20(Constants.USDC).approve(address(usdcPool), 50_000e6);
+        usdcPool.supply(50_000e6);
         vm.stopPrank();
 
         // Use 0.05% pool for flash loan (position LP is V2, no conflict)
@@ -76,7 +68,7 @@ contract V2FlashloanLiquidation is E2EBase {
 
         vm.startPrank(alice);
         IUniswapV2Pair(Constants.UNI_V2_WETH_USDC).approve(address(v2Adapter), lpAmount);
-        positionId = positionManager.deposit(Constants.UNI_V2_WETH_USDC, 0, lpAmount, v2MarketId);
+        positionId = positionManager.deposit(Constants.UNI_V2_WETH_USDC, 0, lpAmount, usdcBorrowAsset);
         vm.stopPrank();
 
         vm.roll(block.number + 2);

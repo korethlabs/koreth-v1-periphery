@@ -46,8 +46,8 @@ contract FlashloanLiquidation is E2EBase {
         uint256 liquidatorUsdcStart = IERC20(Constants.USDC).balanceOf(liquidator);
         uint256 protocolUsdcStart = IERC20(Constants.USDC).balanceOf(address(feeCollector));
         uint256 protocolWethStart = IERC20(Constants.WETH).balanceOf(address(feeCollector));
-        address marketAddr = core.markets(ethUsdcMarketId);
-        uint256 marketUsdcStart = IERC20(Constants.USDC).balanceOf(marketAddr);
+        address poolAddr = address(usdcPool);
+        uint256 poolUsdcStart = IERC20(Constants.USDC).balanceOf(poolAddr);
 
         // Step 1: Alice creates a V3 WETH/USDC position and deposits it
         uint256 tokenId = _createV3Position(alice, 1 ether, 2000e6);
@@ -144,7 +144,7 @@ contract FlashloanLiquidation is E2EBase {
         assertGe(aliceWethEnd, aliceWethAfterDeposit, "borrower must not lose WETH beyond what was deposited");
         uint256 protocolUsdcEnd = IERC20(Constants.USDC).balanceOf(address(feeCollector));
         uint256 protocolWethEnd = IERC20(Constants.WETH).balanceOf(address(feeCollector));
-        uint256 marketUsdcEnd = IERC20(Constants.USDC).balanceOf(marketAddr);
+        uint256 poolUsdcEnd = IERC20(Constants.USDC).balanceOf(poolAddr);
 
         console.log("=========================================================");
         console.log("       FLASH LIQUIDATION - FULL METRICS REPORT");
@@ -180,11 +180,11 @@ contract FlashloanLiquidation is E2EBase {
         console.log("  USDC fees earned:         %s", (protocolUsdcEnd - protocolUsdcStart) / 1e6);
         console.log("  WETH fees earned:         %s", (protocolWethEnd - protocolWethStart) / 1e15);
         console.log("");
-        console.log("--- LENDING MARKET ---");
-        console.log("  USDC in market start:     %s", marketUsdcStart / 1e6);
-        console.log("  USDC in market end:       %s", marketUsdcEnd / 1e6);
-        console.log("  Debt repaid to market:    %s USDC", (borrowAmount - debtAfter) / 1e6);
-        console.log("  Lenders made whole:       %s", marketUsdcEnd >= marketUsdcStart ? "YES" : "NO");
+        console.log("--- LENDING POOL ---");
+        console.log("  USDC in pool start:       %s", poolUsdcStart / 1e6);
+        console.log("  USDC in pool end:         %s", poolUsdcEnd / 1e6);
+        console.log("  Debt repaid to pool:      %s USDC", (borrowAmount - debtAfter) / 1e6);
+        console.log("  Lenders made whole:       %s", poolUsdcEnd >= poolUsdcStart ? "YES" : "NO");
         console.log("");
         console.log("=========================================================");
     }
@@ -300,10 +300,10 @@ contract FlashloanLiquidation is E2EBase {
     // ========================================================================
 
     function _runScenario(string memory name, uint256 borrowPct, uint256 dumpAmountEth) internal {
-        address marketAddr = core.markets(ethUsdcMarketId);
+        address poolAddr = address(usdcPool);
         uint256 protocolUsdcBefore = IERC20(Constants.USDC).balanceOf(address(feeCollector));
         uint256 protocolWethBefore = IERC20(Constants.WETH).balanceOf(address(feeCollector));
-        uint256 marketUsdcBefore = IERC20(Constants.USDC).balanceOf(marketAddr);
+        uint256 poolUsdcBefore = IERC20(Constants.USDC).balanceOf(poolAddr);
         uint256 liquidatorUsdcBefore = IERC20(Constants.USDC).balanceOf(liquidator);
 
         // Deposit and borrow
@@ -357,7 +357,7 @@ contract FlashloanLiquidation is E2EBase {
         uint256 liquidatorUsdcAfter = IERC20(Constants.USDC).balanceOf(liquidator);
         uint256 protocolUsdcEarned = IERC20(Constants.USDC).balanceOf(address(feeCollector)) - protocolUsdcBefore;
         uint256 protocolWethEarned = IERC20(Constants.WETH).balanceOf(address(feeCollector)) - protocolWethBefore;
-        uint256 marketUsdcAfter = IERC20(Constants.USDC).balanceOf(marketAddr);
+        uint256 poolUsdcAfter = IERC20(Constants.USDC).balanceOf(poolAddr);
         uint256 liquidatorProfit = liquidatorUsdcAfter - liquidatorUsdcBefore;
         IPositionManager.Position memory posAfter = positionManager.getPosition(positionId);
         string memory status = uint8(posAfter.status) == 3 ? "LIQUIDATED" : "Active (partial)";
@@ -389,8 +389,8 @@ contract FlashloanLiquidation is E2EBase {
             console.log("  Protocol share:      %s%% of bonus", (protocolTotalUsd * 100) / totalBonus);
             console.log("  Liquidator share:    %s%% of bonus", (liquidatorProfit / 1e6 * 100) / totalBonus);
         }
-        console.log("  Market USDC:         %s -> %s", marketUsdcBefore / 1e6, marketUsdcAfter / 1e6);
-        bool safe = (marketUsdcAfter + debtAfter) >= marketUsdcBefore;
+        console.log("  Pool USDC:           %s -> %s", poolUsdcBefore / 1e6, poolUsdcAfter / 1e6);
+        bool safe = (poolUsdcAfter + debtAfter) >= poolUsdcBefore;
         console.log("  Lenders safe:        %s", safe ? "YES" : "NO");
         console.log("=========================================================");
 

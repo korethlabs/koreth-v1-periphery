@@ -96,11 +96,13 @@ contract PositionViewerE2E is E2EBase {
     }
 
     // ========================================================================
-    // 3. getMarketView — returns supply, borrow, rates for a market
+    // 3. getPoolView / getCollateralTypeView — liquidity and risk, queried separately
     // ========================================================================
 
-    function test_getMarketView() public {
-        // Bob has already supplied to the market in setUp via E2EBase
+    /// @dev These used to be one `getMarketView` call. The shared-pool model made the two
+    ///      orthogonal — one USDC pool backs every collateral type — so they are asserted apart.
+    function test_getPoolView_and_getCollateralTypeView() public {
+        // Bob has already supplied to the pool in setUp via E2EBase
         // Alice borrows to generate utilization
         uint256 tokenId = _createV3Position(alice, 1 ether, 2000e6);
         uint256 positionId = _depositV3(alice, tokenId);
@@ -111,27 +113,32 @@ contract PositionViewerE2E is E2EBase {
         vm.prank(alice);
         lendingEngine.borrow(positionId, borrowAmount);
 
-        // Query market view
-        PositionViewer.MarketView memory mv = positionViewer.getMarketView(ethUsdcMarketId);
+        PositionViewer.PoolView memory pv = positionViewer.getPoolView(usdcBorrowAsset);
 
-        assertEq(mv.id, ethUsdcMarketId, "Market ID must match");
-        assertEq(mv.borrowAsset, Constants.USDC, "Borrow asset must be USDC");
-        assertGt(mv.totalSupply, 0, "Total supply must be > 0");
-        assertGt(mv.totalBorrow, 0, "Total borrow must be > 0 after borrowing");
-        assertGt(mv.utilization, 0, "Utilization must be > 0 after borrowing");
-        assertGt(mv.borrowRateAPR, 0, "Borrow rate must be > 0");
-        assertEq(mv.maxLtv, 6500, "Max LTV must be 6500 (65%)");
+        assertEq(pv.borrowAsset, Constants.USDC, "Borrow asset must be USDC");
+        assertEq(pv.pool, address(usdcPool), "Pool address must match the deployed pool");
+        assertGt(pv.totalSupply, 0, "Total supply must be > 0");
+        assertGt(pv.totalBorrow, 0, "Total borrow must be > 0 after borrowing");
+        assertGt(pv.utilization, 0, "Utilization must be > 0 after borrowing");
+        assertGt(pv.borrowRateAPR, 0, "Borrow rate must be > 0");
 
         // Utilization sanity check: totalBorrow <= totalSupply
-        assertLe(mv.totalBorrow, mv.totalSupply, "Borrow cannot exceed supply");
+        assertLe(pv.totalBorrow, pv.totalSupply, "Borrow cannot exceed supply");
 
-        console.log("=== getMarketView Passed ===");
-        console.log("  Total supply:  %s USDC", mv.totalSupply / 1e6);
-        console.log("  Total borrow:  %s USDC", mv.totalBorrow / 1e6);
-        console.log("  Utilization:   %s%%", mv.utilization / 1e16);
-        console.log("  Supply APR:    %s%%", mv.supplyRateAPR / 1e16);
-        console.log("  Borrow APR:    %s%%", mv.borrowRateAPR / 1e16);
-        console.log("  Max LTV:       %s", mv.maxLtv);
+        PositionViewer.CollateralTypeView memory ctv = positionViewer.getCollateralTypeView(ILPAdapter.LPType.UniswapV3);
+
+        assertEq(ctv.lpType, uint8(ILPAdapter.LPType.UniswapV3), "LP type must match");
+        assertEq(ctv.maxLtv, 6500, "Max LTV must be 6500 (65%)");
+        assertTrue(ctv.enabled, "V3 collateral must be enabled");
+        assertGt(ctv.currentBorrows, 0, "Borrows must be tracked against the collateral type");
+
+        console.log("=== getPoolView / getCollateralTypeView Passed ===");
+        console.log("  Total supply:  %s USDC", pv.totalSupply / 1e6);
+        console.log("  Total borrow:  %s USDC", pv.totalBorrow / 1e6);
+        console.log("  Utilization:   %s%%", pv.utilization / 1e16);
+        console.log("  Supply APR:    %s%%", pv.supplyRateAPR / 1e16);
+        console.log("  Borrow APR:    %s%%", pv.borrowRateAPR / 1e16);
+        console.log("  Max LTV:       %s", ctv.maxLtv);
     }
 
     // ========================================================================
