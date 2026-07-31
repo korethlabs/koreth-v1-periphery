@@ -1,0 +1,40 @@
+name: Check out submodules
+description: >
+  Fetch lib/ submodules, including the private koreth-v1-core. Reports whether it
+  succeeded instead of failing, so contributors and forks without the token get a
+  green (if reduced) run rather than a red check on every PR.
+
+inputs:
+  token:
+    description: >
+      Token with read access to korethlabs/koreth-v1-core. The default GITHUB_TOKEN
+      is scoped to this repository alone and cannot clone a private sibling, so this
+      has to be a separate credential. Leave empty to skip.
+    required: false
+    default: ''
+
+outputs:
+  available:
+    description: '"true" when the submodules were fetched and the build can proceed.'
+    value: ${{ steps.fetch.outputs.available }}
+
+runs:
+  using: composite
+  steps:
+    - id: fetch
+      shell: bash
+      env:
+        SUBMODULE_TOKEN: ${{ inputs.token }}
+      run: |
+        if [ -z "$SUBMODULE_TOKEN" ]; then
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::SUBMODULE_TOKEN not set — skipping build and tests."
+          echo "lib/koreth-v1-core is private and cannot be cloned with the default token."
+          exit 0
+        fi
+        # Rewrite the SSH remote in .gitmodules to an authenticated HTTPS one.
+        # Set globally so it does not end up committed to the checkout.
+        git config --global \
+          url."https://x-access-token:${SUBMODULE_TOKEN}@github.com/".insteadOf "git@github.com:"
+        git submodule update --init --recursive --depth=1
+        echo "available=true" >> "$GITHUB_OUTPUT"

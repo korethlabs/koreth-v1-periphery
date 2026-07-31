@@ -21,13 +21,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
         with:
-          submodules: recursive
+          version: stable
+
+      # Formatting only reads src/, test/ and script/, so it works without the
+      # submodules and stays green even on runs that skip the build below.
+      - name: Check formatting
+        run: forge fmt --check
+
+      - uses: ./.github/actions/checkout-submodules
+        id: submodules
+        with:
+          token: ${{ secrets.SUBMODULE_TOKEN }}
 
       # via-IR compilation of core (pulled in as a submodule) is memory-hungry;
       # the 2-core/7GB runner OOMs without extra headroom. Add swap so solc
       # doesn't get killed.
       - name: Add swap space
+        if: steps.submodules.outputs.available == 'true'
         run: |
           # The runner already has a /swapfile; add a second, larger one on the
           # big /mnt scratch disk rather than colliding with the existing file.
@@ -37,50 +51,48 @@ jobs:
           sudo swapon /mnt/swapfile
           swapon --show
 
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: stable
-
       # Cache the Foundry build so only the first run pays the full via-IR cost.
       # Keyed on the core submodule commit too: periphery compiles core's sources
       # from lib/, so a submodule bump invalidates the build even when no file
       # tracked below has changed.
       - name: Cache forge build
+        if: steps.submodules.outputs.available == 'true'
         uses: actions/cache@v4
         with:
           path: |
             out
             cache
-          key: forge-${{ runner.os }}-${{ hashFiles('src/**/*.sol', 'test/**/*.sol', 'foundry.toml', 'remappings.txt', '.gitmodules', 'lib/koreth-v1-core/src/**/*.sol') }}
+          key: forge-${{ runner.os }}-${{ hashFiles('src/**/*.sol', 'test/**/*.sol', 'foundry.toml', 'remappings.txt', 'lib/koreth-v1-core/src/**/*.sol') }}
           restore-keys: forge-${{ runner.os }}-
 
-      - name: Check formatting
-        run: forge fmt --check
-
       - name: Build (with contract sizes / EIP-170 check)
+        if: steps.submodules.outputs.available == 'true'
         run: forge build --sizes
 
       - name: Unit tests (no fork)
+        if: steps.submodules.outputs.available == 'true'
         run: forge test --match-path "test/unit/**" -vvv
 
-  # e2e tests run against a mainnet fork, so they need an RPC endpoint. This job
-  # runs only when the ETH_RPC_URL secret is configured and skips gracefully
-  # otherwise (so forks/contributors without the secret don't get a red check).
+  # e2e tests run against a mainnet fork, so they need an RPC endpoint on top of
+  # the submodule token. Skips gracefully when either is missing.
   fork-test:
     name: fork tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
 
+      - uses: ./.github/actions/checkout-submodules
+        id: submodules
+        with:
+          token: ${{ secrets.SUBMODULE_TOKEN }}
+
       - name: Fork tests
+        if: steps.submodules.outputs.available == 'true'
         env:
           ETH_RPC_URL: ${{ secrets.ETH_RPC_URL }}
         run: |
