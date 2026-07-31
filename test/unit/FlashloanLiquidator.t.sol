@@ -380,10 +380,7 @@ contract FlashloanLiquidatorTest is Test {
                 token0: address(weth),
                 token1: address(usdc),
                 swapPath0: bytes(""),
-                swapPath1: bytes(""),
-                minProfit: 0,
-                caller: caller,
-                flashLoanPool: address(flashPool) // expects flashPool as sender
+                swapPath1: bytes("")
             })
         );
 

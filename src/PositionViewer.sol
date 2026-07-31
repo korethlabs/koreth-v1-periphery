@@ -117,7 +117,11 @@ contract PositionViewer {
 
     /// @notice Get risk params and current exposure for a collateral type
     function getCollateralTypeView(ILPAdapter.LPType lpType) external view returns (CollateralTypeView memory) {
-        RiskManager riskManager = RiskManager(core.riskManagerAddr());
+        address riskManagerAddr = core.riskManagerAddr();
+        // Unset until an admin wires it post-deploy. Without this the call into address(0) reverts
+        // with no reason string, which is opaque for a view a frontend hits first.
+        require(riskManagerAddr != address(0), "RISK_MANAGER_NOT_SET");
+        RiskManager riskManager = RiskManager(riskManagerAddr);
         RiskManager.CollateralConfig memory cfg = riskManager.getCollateralConfig(lpType);
 
         return CollateralTypeView({

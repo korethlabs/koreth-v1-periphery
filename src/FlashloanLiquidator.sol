@@ -31,7 +31,9 @@ contract FlashloanLiquidator is IUniswapV3FlashCallback {
     ///      Also serves as reentrancy guard (non-zero = flash in progress).
     address private _activeFlashPool;
 
-    /// @dev Packed data passed through the flash loan callback
+    /// @dev Packed data passed through the flash loan callback. Deliberately carries only what the
+    ///      callback reads: the pool is verified against `_activeFlashPool` and the profit check
+    ///      and payout both happen in liquidate(), against `msg.sender` and `params.minProfit`.
     struct FlashCallbackData {
         uint256 positionId;
         uint256 repayAmount;
@@ -40,9 +42,6 @@ contract FlashloanLiquidator is IUniswapV3FlashCallback {
         address token1;
         bytes swapPath0;
         bytes swapPath1;
-        uint256 minProfit;
-        address caller;
-        address flashLoanPool;
     }
 
     /// @dev Swap amountOutMinimum is 0 — slippage protection is end-to-end via minProfit.
@@ -111,10 +110,7 @@ contract FlashloanLiquidator is IUniswapV3FlashCallback {
             token0: pos.token0,
             token1: pos.token1,
             swapPath0: params.swapPath0,
-            swapPath1: params.swapPath1,
-            minProfit: params.minProfit,
-            caller: msg.sender,
-            flashLoanPool: params.flashLoanPool
+            swapPath1: params.swapPath1
         });
 
         // Flash pool must be a real contract before we call into it (clear revert vs low-level decode)
