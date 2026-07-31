@@ -3,7 +3,6 @@ pragma solidity ^0.8.26;
 
 import "@koreth/v1-core/test/e2e/E2EBase.t.sol";
 import {INonfungiblePositionManager} from "@koreth/v1-core/src/interfaces/external/IUniswapV3.sol";
-import {Market} from "@koreth/v1-core/src/markets/Market.sol";
 import {LeverageTransformer} from "../../../src/LeverageTransformer.sol";
 
 /// @title LiquidationEdgeCases

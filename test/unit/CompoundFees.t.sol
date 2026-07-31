@@ -13,11 +13,12 @@ import {IPositionManager} from "@koreth/v1-core/src/interfaces/IPositionManager.
 import {ILPAdapter} from "@koreth/v1-core/src/interfaces/ILPAdapter.sol";
 import {MockLPAdapter} from "@koreth/v1-core/test/mocks/MockLPAdapter.sol";
 import {MockLPOracle} from "@koreth/v1-core/test/mocks/MockLPOracle.sol";
-import {MockMarket} from "@koreth/v1-core/test/mocks/MockMarket.sol";
+import {MockLendingPool} from "@koreth/v1-core/test/mocks/MockLendingPool.sol";
 import {MockERC20} from "@koreth/v1-core/test/mocks/MockERC20.sol";
 import {InterestRateModel} from "@koreth/v1-core/src/markets/InterestRateModel.sol";
 import {LPCompounder} from "../../src/LPCompounder.sol";
 import {RiskManager} from "@koreth/v1-core/src/security/RiskManager.sol";
+import {RiskConfig} from "@koreth/v1-core/test/helpers/RiskConfig.sol";
 
 /// @title CompoundFeesTest
 /// @notice Unit tests for PositionManager.compoundFees and LPCompounder
@@ -30,7 +31,8 @@ contract CompoundFeesTest is Test {
     LPCompounder public compounder;
     MockLPAdapter public adapter;
     MockLPOracle public oracle;
-    MockMarket public market;
+    MockLendingPool public pool;
+    RiskManager public riskManager;
     MockERC20 public token0;
     MockERC20 public token1;
     MockERC20 public usdc;
@@ -44,7 +46,7 @@ contract CompoundFeesTest is Test {
     address public insurance = makeAddr("insurance");
     address public lpToken = makeAddr("lpToken");
 
-    uint256 public marketId;
+    address public borrowAsset;
     uint256 public positionId;
 
     event FeesCompoundedInternal(uint256 indexed positionId, uint256 fees0, uint256 fees1, uint256 addedLiquidity);
@@ -53,7 +55,7 @@ contract CompoundFeesTest is Test {
         // Deploy tokens
         token0 = new MockERC20("WETH", "WETH", 18);
         token1 = new MockERC20("USDC", "USDC", 6);
-        usdc = new MockERC20("USDC-Market", "USDC", 6);
+        usdc = new MockERC20("USDC-Borrow", "USDC", 6);
 
         // Deploy ACLManager and core
         aclManager = new ACLManager(owner);
@@ -97,7 +99,9 @@ contract CompoundFeesTest is Test {
         adapter.setTokenReturns(address(token0), address(token1));
         oracle = new MockLPOracle();
         InterestRateModel irm = new InterestRateModel(200, 600, 10_000, 8000);
-        market = new MockMarket(address(usdc), address(irm));
+        pool = new MockLendingPool(address(usdc), address(irm));
+        borrowAsset = address(usdc);
+        riskManager = new RiskManager(address(core));
 
         // Register everything
         vm.startPrank(owner);
@@ -108,14 +112,17 @@ contract CompoundFeesTest is Test {
         aclManager.addKeeper(keeper);
         core.registerAdapter(ILPAdapter.LPType.UniswapV3, address(adapter));
         core.registerOracle(ILPAdapter.LPType.UniswapV3, address(oracle));
+        aclManager.addRiskAdmin(owner);
         core.whitelistPool(lpToken);
-        marketId = core.registerMarket(address(market));
+        core.registerPool(address(usdc), address(pool));
+        core.setRiskManager(address(riskManager));
+        riskManager.setCollateralConfig(ILPAdapter.LPType.UniswapV3, RiskConfig.defaultConfig());
         pm.setLendingEngine(address(le));
         vm.stopPrank();
 
         // Deposit a position as alice
         vm.prank(alice);
-        positionId = pm.deposit(lpToken, 42, 100e18, marketId);
+        positionId = pm.deposit(lpToken, 42, 100e18, borrowAsset);
     }
 
     /// @dev Helper to build CompoundFeesParams (replaces 8-param call pattern)
@@ -155,14 +162,11 @@ contract CompoundFeesTest is Test {
     // ========== Access Control ==========
 
     /// @notice Compounding runs through a wired RiskManager (recording the reinvested delta) and
-    ///         is NOT blocked by the market supply cap — compounding a position's own fees is
+    ///         is NOT blocked by the pool supply cap — compounding a position's own fees is
     ///         track-only, not cap-enforced.
     function test_compoundFees_notBlockedBySupplyCap() public {
-        RiskManager rm = new RiskManager(address(core));
-        vm.startPrank(owner);
-        core.setRiskManager(address(rm));
-        rm.setMarketSupplyCap(marketId, 1); // effectively "at cap"
-        vm.stopPrank();
+        vm.prank(owner);
+        riskManager.setPoolSupplyCap(borrowAsset, 1); // effectively "at cap"
 
         _setupFees(1e18, 1000e6);
 
@@ -452,19 +456,17 @@ contract CompoundFeesTest is Test {
         // Set pool return so whitelisting works
         v2Adapter.setTokenReturns(address(token0), address(token1));
 
-        // Create a V2-typed market
-        MockMarket v2Market = new MockMarket(address(usdc), address(new InterestRateModel(200, 600, 10_000, 8000)));
-        v2Market.setLpType(ILPAdapter.LPType.UniswapV2);
-
+        // No second pool needed — the USDC pool is shared across collateral types. The position
+        // is V2 because its lpToken's adapter is V2; only the risk config has to be opened up.
         vm.startPrank(owner);
         core.registerAdapter(ILPAdapter.LPType.UniswapV2, address(v2Adapter));
         core.registerOracle(ILPAdapter.LPType.UniswapV2, address(oracle));
         core.whitelistPool(v2LpToken);
-        uint256 v2MarketId = core.registerMarket(address(v2Market));
+        riskManager.setCollateralConfig(ILPAdapter.LPType.UniswapV2, RiskConfig.defaultConfig());
         vm.stopPrank();
 
         vm.prank(alice);
-        uint256 v2PosId = pm.deposit(v2LpToken, 1, 100e18, v2MarketId);
+        uint256 v2PosId = pm.deposit(v2LpToken, 1, 100e18, borrowAsset);
 
         // Verify it's a V2 position
         IPositionManager.Position memory pos = pm.getPosition(v2PosId);
@@ -478,7 +480,7 @@ contract CompoundFeesTest is Test {
     function test_compounder_batchCompound() public {
         // Create second position
         vm.prank(alice);
-        uint256 posId2 = pm.deposit(lpToken, 43, 50e18, marketId);
+        uint256 posId2 = pm.deposit(lpToken, 43, 50e18, borrowAsset);
 
         // Fund adapter with enough fees for both
         _setupFees(2e18, 4000e6);

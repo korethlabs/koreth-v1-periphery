@@ -8,7 +8,6 @@ import {ISwapRouter} from "@koreth/v1-core/src/interfaces/ISwapRouter.sol";
 import {ProtocolCore} from "@koreth/v1-core/src/core/ProtocolCore.sol";
 import {PositionManager} from "@koreth/v1-core/src/core/PositionManager.sol";
 import {LiquidationEngine} from "@koreth/v1-core/src/core/LiquidationEngine.sol";
-import {IMarket} from "@koreth/v1-core/src/interfaces/IMarket.sol";
 import {IPositionManager} from "@koreth/v1-core/src/interfaces/IPositionManager.sol";
 
 /// @title FlashloanLiquidator
@@ -18,7 +17,7 @@ import {IPositionManager} from "@koreth/v1-core/src/interfaces/IPositionManager.
 ///         profit to the caller.
 /// @dev Uses Uniswap V3 pool.flash() (fee = pool's fee tier). Supports multi-hop swap paths for
 ///      exotic token pairs (e.g., WBTC→WETH→USDC). The borrow asset is read dynamically
-///      from the market config — not hardcoded to any specific token.
+///      from the position — not hardcoded to any specific token.
 contract FlashloanLiquidator is IUniswapV3FlashCallback {
     using SafeERC20 for IERC20;
 
@@ -32,19 +31,17 @@ contract FlashloanLiquidator is IUniswapV3FlashCallback {
     ///      Also serves as reentrancy guard (non-zero = flash in progress).
     address private _activeFlashPool;
 
-    /// @dev Packed data passed through the flash loan callback
+    /// @dev Packed data passed through the flash loan callback. Deliberately carries only what the
+    ///      callback reads: the pool is verified against `_activeFlashPool` and the profit check
+    ///      and payout both happen in liquidate(), against `msg.sender` and `params.minProfit`.
     struct FlashCallbackData {
         uint256 positionId;
         uint256 repayAmount;
         address borrowAsset;
         address token0;
         address token1;
-        address marketAddr;
         bytes swapPath0;
         bytes swapPath1;
-        uint256 minProfit;
-        address caller;
-        address flashLoanPool;
     }
 
     /// @dev Swap amountOutMinimum is 0 — slippage protection is end-to-end via minProfit.
@@ -97,13 +94,12 @@ contract FlashloanLiquidator is IUniswapV3FlashCallback {
         // Reentrancy guard — _activeFlashPool is non-zero during a flash
         require(_activeFlashPool == address(0), "FLASH_IN_PROGRESS");
 
-        // Read position and market info
+        // Read position info. The borrow asset is on the position itself now — it is what selects
+        // the shared pool — so there is no pool lookup to do here.
         IPositionManager.Position memory pos = positionManager.getPosition(params.positionId);
         require(pos.owner != address(0), "POSITION_NOT_FOUND");
 
-        address marketAddr = core.markets(pos.marketId);
-        IMarket.MarketConfig memory config = IMarket(marketAddr).getConfig();
-        address borrowAsset = config.borrowAsset;
+        address borrowAsset = pos.borrowAsset;
 
         // Track balance before for accurate profit calculation
         uint256 balanceBefore = IERC20(borrowAsset).balanceOf(address(this));
@@ -113,12 +109,8 @@ contract FlashloanLiquidator is IUniswapV3FlashCallback {
             borrowAsset: borrowAsset,
             token0: pos.token0,
             token1: pos.token1,
-            marketAddr: marketAddr,
             swapPath0: params.swapPath0,
-            swapPath1: params.swapPath1,
-            minProfit: params.minProfit,
-            caller: msg.sender,
-            flashLoanPool: params.flashLoanPool
+            swapPath1: params.swapPath1
         });
 
         // Flash pool must be a real contract before we call into it (clear revert vs low-level decode)

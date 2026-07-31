@@ -15,9 +15,11 @@ import {ILPAdapter} from "@koreth/v1-core/src/interfaces/ILPAdapter.sol";
 import {FlashloanLiquidator} from "../../src/FlashloanLiquidator.sol";
 import {MockLPAdapter} from "@koreth/v1-core/test/mocks/MockLPAdapter.sol";
 import {MockLPOracle} from "@koreth/v1-core/test/mocks/MockLPOracle.sol";
-import {MockMarket} from "@koreth/v1-core/test/mocks/MockMarket.sol";
+import {MockLendingPool} from "@koreth/v1-core/test/mocks/MockLendingPool.sol";
 import {MockERC20} from "@koreth/v1-core/test/mocks/MockERC20.sol";
 import {MockSwapRouter} from "@koreth/v1-core/test/mocks/MockSwapRouter.sol";
+import {RiskManager} from "@koreth/v1-core/src/security/RiskManager.sol";
+import {RiskConfig} from "@koreth/v1-core/test/helpers/RiskConfig.sol";
 
 /// @notice Mock Uniswap V3 pool that simulates flash loans
 /// @dev Holds borrow asset tokens. On flash(), transfers requested amounts to recipient,
@@ -90,7 +92,8 @@ contract FlashloanLiquidatorTest is Test {
     LPOracleHub public oracleHub;
     MockLPAdapter public adapter;
     MockLPOracle public oracle;
-    MockMarket public market;
+    MockLendingPool public pool;
+    RiskManager public riskManager;
     MockERC20 public usdc;
     MockERC20 public weth;
     InterestRateModel public irm;
@@ -105,7 +108,7 @@ contract FlashloanLiquidatorTest is Test {
     address public caller = makeAddr("caller");
     address public lpToken = makeAddr("lpToken");
 
-    uint256 public marketId;
+    address public borrowAsset;
 
     event FlashLiquidation(
         uint256 indexed positionId, address indexed liquidator, address borrowAsset, uint256 repayAmount, uint256 profit
@@ -161,8 +164,9 @@ contract FlashloanLiquidatorTest is Test {
         adapter.setSupportedToken(lpToken, true);
         oracle = new MockLPOracle();
         oracle.setPrice(50_000e18);
-        market = new MockMarket(address(usdc), address(irm));
-        market.setLpType(ILPAdapter.LPType.UniswapV2);
+        pool = new MockLendingPool(address(usdc), address(irm));
+        borrowAsset = address(usdc);
+        riskManager = new RiskManager(address(core));
 
         // Swap router mock — outputs USDC
         swapRouter = new MockSwapRouter(address(usdc));
@@ -187,10 +191,13 @@ contract FlashloanLiquidatorTest is Test {
         aclManager.addLendingEngine(address(le));
         aclManager.addLiquidationEngine(address(liq));
         aclManager.addPositionManager(address(pm));
+        aclManager.addRiskAdmin(owner);
         core.registerAdapter(ILPAdapter.LPType.UniswapV2, address(adapter));
         core.registerOracle(ILPAdapter.LPType.UniswapV2, address(oracle));
         core.whitelistPool(lpToken);
-        marketId = core.registerMarket(address(market));
+        core.registerPool(address(usdc), address(pool));
+        core.setRiskManager(address(riskManager));
+        riskManager.setCollateralConfig(ILPAdapter.LPType.UniswapV2, RiskConfig.defaultConfig());
         pm.setLendingEngine(address(le));
         vm.stopPrank();
 
@@ -199,8 +206,8 @@ contract FlashloanLiquidatorTest is Test {
         adapter.setUnwindAmounts(25e18, 25_000e18);
         adapter.setTotalLiquidity(100e18);
 
-        // Fund market, adapter, flash pool, and swap router with tokens
-        usdc.mint(address(market), 1_000_000e18);
+        // Fund pool, adapter, flash pool, and swap router with tokens
+        usdc.mint(address(pool), 1_000_000e18);
         weth.mint(address(adapter), 1_000_000e18);
         usdc.mint(address(adapter), 1_000_000e18);
         usdc.mint(address(flashPool), 1_000_000e18);
@@ -213,7 +220,7 @@ contract FlashloanLiquidatorTest is Test {
     /// @notice Create a position and borrow, then make it liquidatable by dropping oracle price
     function _createLiquidatablePosition() internal returns (uint256 posId) {
         vm.prank(alice);
-        posId = pm.deposit(lpToken, 0, 100e18, marketId);
+        posId = pm.deposit(lpToken, 0, 100e18, borrowAsset);
         vm.roll(block.number + 2);
 
         // Alice borrows $30K (within 65% LTV of $50K)
@@ -336,7 +343,7 @@ contract FlashloanLiquidatorTest is Test {
 
         oracle.setPrice(50_000e18);
         vm.prank(alice);
-        uint256 posId = pm.deposit(lpToken, 0, 100e18, marketId);
+        uint256 posId = pm.deposit(lpToken, 0, 100e18, borrowAsset);
         vm.roll(block.number + 2);
         vm.prank(alice);
         le.borrow(posId, 30_000e18);
@@ -372,12 +379,8 @@ contract FlashloanLiquidatorTest is Test {
                 borrowAsset: address(usdc),
                 token0: address(weth),
                 token1: address(usdc),
-                marketAddr: address(market),
                 swapPath0: bytes(""),
-                swapPath1: bytes(""),
-                minProfit: 0,
-                caller: caller,
-                flashLoanPool: address(flashPool) // expects flashPool as sender
+                swapPath1: bytes("")
             })
         );
 

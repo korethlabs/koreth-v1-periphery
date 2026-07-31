@@ -7,12 +7,14 @@ import {ProtocolCore} from "@koreth/v1-core/src/core/ProtocolCore.sol";
 import {ACLManager} from "@koreth/v1-core/src/core/ACLManager.sol";
 import {PositionManager} from "@koreth/v1-core/src/core/PositionManager.sol";
 import {LendingEngine} from "@koreth/v1-core/src/core/LendingEngine.sol";
-import {Market} from "@koreth/v1-core/src/markets/Market.sol";
+import {LendingPool} from "@koreth/v1-core/src/markets/LendingPool.sol";
 import {InterestRateModel} from "@koreth/v1-core/src/markets/InterestRateModel.sol";
 import {LPOracleHub} from "@koreth/v1-core/src/oracle/LPOracleHub.sol";
 import {IPositionManager} from "@koreth/v1-core/src/interfaces/IPositionManager.sol";
 import {ILPAdapter} from "@koreth/v1-core/src/interfaces/ILPAdapter.sol";
-import {IMarket} from "@koreth/v1-core/src/interfaces/IMarket.sol";
+import {ILendingPool} from "@koreth/v1-core/src/interfaces/ILendingPool.sol";
+import {RiskManager} from "@koreth/v1-core/src/security/RiskManager.sol";
+import {RiskConfig} from "@koreth/v1-core/test/helpers/RiskConfig.sol";
 import {LeverageTransformer} from "../../src/LeverageTransformer.sol";
 import {MockLPAdapter} from "@koreth/v1-core/test/mocks/MockLPAdapter.sol";
 import {MockLPOracle} from "@koreth/v1-core/test/mocks/MockLPOracle.sol";
@@ -71,12 +73,13 @@ contract LeverageTransformerTest is Test {
     MockFlashPoolWithFee public flashPool;
     MockV3Factory public v3Factory;
     LeverageTransformer public lt;
-    Market public market;
+    LendingPool public pool;
+    RiskManager public riskManager;
 
     address public owner = makeAddr("owner");
     address public alice = makeAddr("alice");
     address public lpToken = makeAddr("lpToken");
-    uint256 public marketId;
+    address public borrowAsset;
 
     function setUp() public {
         usdc = new MockERC20("USDC", "USDC", 18);
@@ -116,23 +119,17 @@ contract LeverageTransformerTest is Test {
             )
         );
 
-        IMarket.MarketConfig memory mConfig = IMarket.MarketConfig({
-            lpType: ILPAdapter.LPType.UniswapV3,
-            borrowAsset: address(usdc),
-            maxLtv: 6500,
-            liquidationThreshold: 7500,
-            liquidationBonus: 500,
-            borrowCap: 100_000_000e18,
-            minPoolTvl: 0,
-            minPoolAge: 0
-        });
-        market = Market(
+        ILendingPool.PoolConfig memory poolConfig = ILendingPool.PoolConfig({borrowAsset: address(usdc)});
+        pool = LendingPool(
             address(
                 new ERC1967Proxy(
-                    address(new Market()), abi.encodeCall(Market.initialize, (mConfig, address(irm), address(core)))
+                    address(new LendingPool()),
+                    abi.encodeCall(LendingPool.initialize, (poolConfig, address(irm), address(core)))
                 )
             )
         );
+        borrowAsset = address(usdc);
+        riskManager = new RiskManager(address(core));
 
         adapter = new MockLPAdapter(ILPAdapter.LPType.UniswapV3);
         adapter.setSupportedToken(lpToken, true);
@@ -143,10 +140,13 @@ contract LeverageTransformerTest is Test {
         vm.startPrank(owner);
         aclManager.addLendingEngine(address(le));
         aclManager.addPositionManager(address(pm));
+        aclManager.addRiskAdmin(owner);
         core.registerAdapter(ILPAdapter.LPType.UniswapV3, address(adapter));
         core.registerOracle(ILPAdapter.LPType.UniswapV3, address(oracle));
         core.whitelistPool(lpToken);
-        marketId = core.registerMarket(address(market));
+        core.registerPool(address(usdc), address(pool));
+        core.setRiskManager(address(riskManager));
+        riskManager.setCollateralConfig(ILPAdapter.LPType.UniswapV3, RiskConfig.defaultConfig());
         pm.setLendingEngine(address(le));
         vm.stopPrank();
 
@@ -220,7 +220,7 @@ contract LeverageTransformerTest is Test {
         MockFlashPoolWithFee fakePool = new MockFlashPoolWithFee(flashPool.token0(), flashPool.token1());
 
         vm.prank(alice);
-        uint256 posId = pm.deposit(lpToken, 1, 100e18, marketId);
+        uint256 posId = pm.deposit(lpToken, 1, 100e18, borrowAsset);
         vm.roll(block.number + 2);
 
         LeverageTransformer.LeverageUpParams memory params = LeverageTransformer.LeverageUpParams({
@@ -243,7 +243,7 @@ contract LeverageTransformerTest is Test {
 
     function test_leverageUp_revertsZeroFlashPool() public {
         vm.prank(alice);
-        uint256 posId = pm.deposit(lpToken, 1, 100e18, marketId);
+        uint256 posId = pm.deposit(lpToken, 1, 100e18, borrowAsset);
         vm.roll(block.number + 2);
 
         LeverageTransformer.LeverageUpParams memory params = LeverageTransformer.LeverageUpParams({
@@ -266,7 +266,7 @@ contract LeverageTransformerTest is Test {
 
     function test_leverageUp_revertsZeroFlash() public {
         vm.prank(alice);
-        uint256 posId = pm.deposit(lpToken, 1, 100e18, marketId);
+        uint256 posId = pm.deposit(lpToken, 1, 100e18, borrowAsset);
         vm.roll(block.number + 2);
 
         LeverageTransformer.LeverageUpParams memory params = LeverageTransformer.LeverageUpParams({
