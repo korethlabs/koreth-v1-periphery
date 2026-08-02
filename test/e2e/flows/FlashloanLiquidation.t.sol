@@ -13,7 +13,17 @@ contract FlashloanLiquidation is E2EBase {
     FlashloanLiquidator public flashLiquidator;
     address public flashPool;
 
+    /// @dev The scenarios below crash a *real* Uniswap pool by dumping a fixed amount of ETH into
+    ///      it, so both the price they land on and — more importantly — the depth left for the
+    ///      liquidator's exit swap depend on where that pool's concentrated liquidity happens to
+    ///      sit. That moves daily: the same dump that leaves a healthily liquidatable position one
+    ///      week pushes the price clean out of the liquid range the next, where selling even 2 WETH
+    ///      slips ~20% and the seized collateral no longer covers the flash repayment. Pinning the
+    ///      block keeps the dump amounts meaning what their scenario names say.
+    uint256 internal constant FORK_BLOCK = 25_600_000;
+
     function setUp() public override {
+        vm.rollFork(FORK_BLOCK);
         super.setUp();
 
         // Use 0.05% pool for flash loan — position LP is in 0.3% pool, can't flash from same pool (LOK)
@@ -424,8 +434,10 @@ contract FlashloanLiquidation is E2EBase {
     // ========================================================================
 
     function test_scenario_bigMarketCrash() public {
-        // 95% borrow, big ETH dump → severe crash
-        _runScenario("BIG MARKET CRASH", 95, 4250 ether);
+        // 95% borrow, big ETH dump → severe crash. This is the deepest crash the flash route still
+        // clears at FORK_BLOCK: past roughly 4240 ETH the price leaves the concentrated-liquidity
+        // band entirely, and the exit swap slips more than the liquidator's share of the bonus.
+        _runScenario("BIG MARKET CRASH", 95, 4220 ether);
     }
 
     // ========================================================================
