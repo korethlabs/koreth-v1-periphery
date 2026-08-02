@@ -91,6 +91,18 @@ jobs:
         with:
           token: ${{ secrets.SUBMODULE_TOKEN }}
 
+      # The e2e suite pins its fork block, so every run reads the same historical state and the
+      # responses can be replayed from disk. Without this each run re-fetches thousands of storage
+      # slots from the provider, which is both slow and the reason a run can die on a single
+      # timed-out request. Keyed on the tests because that is what decides which state gets read.
+      - name: Cache fork RPC responses
+        if: steps.submodules.outputs.available == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.foundry/cache/rpc
+          key: rpc-${{ runner.os }}-${{ hashFiles('test/e2e/**/*.sol', 'lib/koreth-v1-core/test/**/*.sol') }}
+          restore-keys: rpc-${{ runner.os }}-
+
       - name: Fork tests
         if: steps.submodules.outputs.available == 'true'
         env:
@@ -100,4 +112,7 @@ jobs:
             echo "ETH_RPC_URL secret not set — skipping fork tests."
             exit 0
           fi
-          forge test --fork-url "$ETH_RPC_URL" --match-path "test/e2e/**" -vvv
+          # A cold cache still means thousands of live requests, so ride out a provider hiccup
+          # rather than failing the whole suite on one dropped response.
+          forge test --fork-url "$ETH_RPC_URL" --match-path "test/e2e/**" -vvv \
+            --fork-retries 5 --fork-retry-backoff 2
