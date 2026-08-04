@@ -289,7 +289,7 @@ contract LeverageTransformer is IUniswapV3FlashCallback {
 
         // Step 1: Repay debt — approve the pool (LendingPool.transferIn pulls from payer)
         IPositionManager.Position memory pos = positionManager.getPosition(ctx.positionId);
-        IERC20(ctx.borrowAsset).forceApprove(core.pools(pos.borrowAsset), ctx.repayAmount);
+        IERC20(ctx.borrowAsset).forceApprove(core.lendingPool(pos.borrowAsset), ctx.repayAmount);
         lendingEngine.repay(ctx.positionId, ctx.repayAmount);
 
         // Step 2: Remove collateral — now possible because debt is lower (HF improved)

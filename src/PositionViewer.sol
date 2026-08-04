@@ -100,7 +100,7 @@ contract PositionViewer {
 
     /// @notice Get liquidity overview for the shared pool of a borrow asset
     function getPoolView(address borrowAsset) external view returns (PoolView memory) {
-        address poolAddr = core.pools(borrowAsset);
+        address poolAddr = core.lendingPool(borrowAsset);
         require(poolAddr != address(0), "POOL_NOT_FOUND");
         ILendingPool.PoolState memory state = ILendingPool(poolAddr).getPoolState();
 
