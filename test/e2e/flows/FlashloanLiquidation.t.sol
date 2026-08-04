@@ -18,12 +18,10 @@ contract FlashloanLiquidation is E2EBase {
     ///      liquidator's exit swap depend on where that pool's concentrated liquidity happens to
     ///      sit. That moves daily: the same dump that leaves a healthily liquidatable position one
     ///      week pushes the price clean out of the liquid range the next, where selling even 2 WETH
-    ///      slips ~20% and the seized collateral no longer covers the flash repayment. Pinning the
-    ///      block keeps the dump amounts meaning what their scenario names say.
-    uint256 internal constant FORK_BLOCK = 25_600_000;
-
+    ///      slips ~20% and the seized collateral no longer covers the flash repayment. The dump
+    ///      amounts below are calibrated against ForkTestBase.FORK_BLOCK, which pins the block for
+    ///      every fork test in core and, through E2EBase, here too.
     function setUp() public override {
-        vm.rollFork(FORK_BLOCK);
         super.setUp();
 
         // Use 0.05% pool for flash loan — position LP is in 0.3% pool, can't flash from same pool (LOK)

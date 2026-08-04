@@ -12,6 +12,9 @@ import {LPOracleHub} from "@koreth/v1-core/src/oracle/LPOracleHub.sol";
 import {IPositionManager} from "@koreth/v1-core/src/interfaces/IPositionManager.sol";
 import {ILPAdapter} from "@koreth/v1-core/src/interfaces/ILPAdapter.sol";
 import {MockLPAdapter} from "@koreth/v1-core/test/mocks/MockLPAdapter.sol";
+import {TestPools} from "@koreth/v1-core/test/helpers/TestPools.sol";
+import {TestPricing} from "@koreth/v1-core/test/helpers/TestPricing.sol";
+import {TestSecurity} from "@koreth/v1-core/test/helpers/TestSecurity.sol";
 import {MockLPOracle} from "@koreth/v1-core/test/mocks/MockLPOracle.sol";
 import {MockLendingPool} from "@koreth/v1-core/test/mocks/MockLendingPool.sol";
 import {MockERC20} from "@koreth/v1-core/test/mocks/MockERC20.sol";
@@ -113,10 +116,12 @@ contract CompoundFeesTest is Test {
         core.registerAdapter(ILPAdapter.LPType.UniswapV3, address(adapter));
         core.registerOracle(ILPAdapter.LPType.UniswapV3, address(oracle));
         aclManager.addRiskAdmin(owner);
-        core.whitelistPool(lpToken);
-        core.registerPool(address(usdc), address(pool));
+        core.whitelistLpPool(TestPools.asContract(lpToken));
+        TestPricing.wireStable(core, address(usdc));
+        core.registerLendingPool(address(usdc), address(pool));
         core.setRiskManager(address(riskManager));
         riskManager.setCollateralConfig(ILPAdapter.LPType.UniswapV3, RiskConfig.defaultConfig());
+        TestSecurity.wireBreaker(core, pm);
         pm.setLendingEngine(address(le));
         vm.stopPrank();
 
@@ -461,7 +466,7 @@ contract CompoundFeesTest is Test {
         vm.startPrank(owner);
         core.registerAdapter(ILPAdapter.LPType.UniswapV2, address(v2Adapter));
         core.registerOracle(ILPAdapter.LPType.UniswapV2, address(oracle));
-        core.whitelistPool(v2LpToken);
+        core.whitelistLpPool(TestPools.asContract(v2LpToken));
         riskManager.setCollateralConfig(ILPAdapter.LPType.UniswapV2, RiskConfig.defaultConfig());
         vm.stopPrank();
 
