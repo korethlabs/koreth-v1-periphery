@@ -116,12 +116,16 @@ contract CompoundFeesTest is Test {
         core.registerAdapter(ILPAdapter.LPType.UniswapV3, address(adapter));
         core.registerOracle(ILPAdapter.LPType.UniswapV3, address(oracle));
         aclManager.addRiskAdmin(owner);
-        core.whitelistLpPool(TestPools.asContract(lpToken));
+        core.whitelistLpPool(TestPools.asContract(lpToken), ILPAdapter.LPType.UniswapV3);
         TestPricing.wireStable(core, address(usdc));
         core.registerLendingPool(address(usdc), address(pool));
         core.setRiskManager(address(riskManager));
         riskManager.setCollateralConfig(ILPAdapter.LPType.UniswapV3, RiskConfig.defaultConfig());
         TestSecurity.wireBreaker(core, pm);
+        // The protocol fee destination is a protocol setting, not a caller argument: compoundFees
+        // requires params.protocolFeeRecipient to equal this pinned address whenever the protocol
+        // fee is nonzero, so the suite has to pin the same collector it passes in.
+        pm.setFeeCollector(address(feeCollector));
         pm.setLendingEngine(address(le));
         vm.stopPrank();
 
@@ -218,7 +222,7 @@ contract CompoundFeesTest is Test {
     function test_compoundFees_revertsZeroRefundAddress() public {
         _setupFees(1e18, 2000e6);
         vm.prank(keeper);
-        vm.expectRevert("ZERO_REFUND_ADDRESS");
+        vm.expectRevert("INVALID_DUST_RECIPIENT");
         pm.compoundFees(_cfParams(positionId, address(feeCollector), 200, keeper, 50, 0, address(0), 0));
     }
 
@@ -466,7 +470,7 @@ contract CompoundFeesTest is Test {
         vm.startPrank(owner);
         core.registerAdapter(ILPAdapter.LPType.UniswapV2, address(v2Adapter));
         core.registerOracle(ILPAdapter.LPType.UniswapV2, address(oracle));
-        core.whitelistLpPool(TestPools.asContract(v2LpToken));
+        core.whitelistLpPool(TestPools.asContract(v2LpToken), ILPAdapter.LPType.UniswapV2);
         riskManager.setCollateralConfig(ILPAdapter.LPType.UniswapV2, RiskConfig.defaultConfig());
         vm.stopPrank();
 
