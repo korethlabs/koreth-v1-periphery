@@ -9,6 +9,7 @@ import {PositionManager} from "@koreth/v1-core/src/core/PositionManager.sol";
 import {LendingEngine} from "@koreth/v1-core/src/core/LendingEngine.sol";
 import {LiquidationEngine} from "@koreth/v1-core/src/core/LiquidationEngine.sol";
 import {LPOracleHub} from "@koreth/v1-core/src/oracle/LPOracleHub.sol";
+import {PriceFeedRegistry} from "@koreth/v1-core/src/oracle/PriceFeedRegistry.sol";
 import {InterestRateModel} from "@koreth/v1-core/src/markets/InterestRateModel.sol";
 import {IPositionManager} from "@koreth/v1-core/src/interfaces/IPositionManager.sol";
 import {ILPAdapter} from "@koreth/v1-core/src/interfaces/ILPAdapter.sol";
@@ -197,8 +198,13 @@ contract FlashloanLiquidatorTest is Test {
         aclManager.addRiskAdmin(owner);
         core.registerAdapter(ILPAdapter.LPType.UniswapV2, address(adapter));
         core.registerOracle(ILPAdapter.LPType.UniswapV2, address(oracle));
-        core.whitelistLpPool(TestPools.asContract(lpToken));
-        TestPricing.wireStable(core, address(usdc));
+        core.whitelistLpPool(TestPools.asContract(lpToken), ILPAdapter.LPType.UniswapV2);
+        // Both collateral tokens need a feed, not just the borrow asset: liquidation values what it
+        // actually recovered through the registry, so an unpriced side fails closed with NO_PRICE_FEED.
+        // WETH is priced at the same 2000 USDC the swap router quotes above, so the fixture values
+        // the collateral the same way it trades it.
+        PriceFeedRegistry priceRegistry = TestPricing.wireStable(core, address(usdc));
+        TestPricing.priceAsset(priceRegistry, address(weth), 2000e18);
         core.registerLendingPool(address(usdc), address(pool));
         core.setRiskManager(address(riskManager));
         riskManager.setCollateralConfig(ILPAdapter.LPType.UniswapV2, RiskConfig.defaultConfig());
