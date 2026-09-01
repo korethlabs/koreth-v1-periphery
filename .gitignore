@@ -18,3 +18,9 @@ docs/
 .idea/
 .vscode/
 *.swp
+
+# Local agent harness config — not protocol source
+.axa/
+AXA.md
+.claude/
+CLAUDE.md
