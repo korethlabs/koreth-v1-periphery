@@ -22,10 +22,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pinned rather than `stable`, because `forge fmt` is not stable across releases:
+      # 1.8.0 changed the indentation of named struct arguments nested inside a chained
+      # call, so a tree formatted by one release fails `--check` under the next. That is
+      # what turned this job red without a source change. Bump this deliberately,
+      # reformatting in the same commit. Keep every install site in this repo and in
+      # koreth-v1-core on the same version — their [fmt] settings are identical, so a
+      # mismatch is a red check in one repo and not the other.
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: stable
+          version: v1.7.1
 
       # Formatting only reads src/, test/ and script/, so it works without the
       # submodules and stays green even on runs that skip the build below.
@@ -81,10 +88,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Same version as build-test above. This job does not format, but it does the
+      # via-IR compile of core from lib/, and a solc or optimiser difference between the
+      # two jobs would mean the artifacts they cache are not interchangeable.
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: stable
+          version: v1.7.1
 
       - uses: ./.github/actions/checkout-submodules
         id: submodules
