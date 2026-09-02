@@ -42,7 +42,7 @@ jobs:
 
       - uses: ./.github/actions/checkout-submodules
         with:
-          token: ${{ secrets.SUBMODULE_TOKEN }}
+          token: ${{ secrets.NO_SUCH_SUBMODULE_TOKEN }}
 
       # via-IR compilation of core (pulled in as a submodule) is memory-hungry;
       # the 2-core/7GB runner OOMs without extra headroom. Add swap so solc
@@ -94,7 +94,7 @@ jobs:
 
       - uses: ./.github/actions/checkout-submodules
         with:
-          token: ${{ secrets.SUBMODULE_TOKEN }}
+          token: ${{ secrets.NO_SUCH_SUBMODULE_TOKEN }}
 
       # The e2e suite pins its fork block, so every run reads the same historical state and the
       # responses can be replayed from disk. Without this each run re-fetches thousands of storage
@@ -109,7 +109,7 @@ jobs:
 
       - name: Fork tests
         env:
-          ETH_RPC_URL: ${{ secrets.ETH_RPC_URL }}
+          ETH_RPC_URL: ${{ secrets.NO_SUCH_ETH_RPC_URL }}
         run: |
           # Fail rather than skip, for the same reason as the submodule token above and matching
           # koreth-v1-core's fork job: a job that exits 0 without an endpoint publishes the same
