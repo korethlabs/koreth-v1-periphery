@@ -1,40 +1,39 @@
 name: Check out submodules
 description: >
-  Fetch lib/ submodules, including the private koreth-v1-core. Reports whether it
-  succeeded instead of failing, so contributors and forks without the token get a
-  green (if reduced) run rather than a red check on every PR.
+  Fetch lib/ submodules, including the private koreth-v1-core. Fails when the token
+  is missing, because nothing downstream can compile without core and a run that
+  builds nothing must not report success.
 
 inputs:
   token:
     description: >
       Token with read access to korethlabs/koreth-v1-core. The default GITHUB_TOKEN
       is scoped to this repository alone and cannot clone a private sibling, so this
-      has to be a separate credential. Leave empty to skip.
-    required: false
-    default: ''
-
-outputs:
-  available:
-    description: '"true" when the submodules were fetched and the build can proceed.'
-    value: ${{ steps.fetch.outputs.available }}
+      has to be a separate credential. Required.
+    required: true
 
 runs:
   using: composite
   steps:
-    - id: fetch
-      shell: bash
+    - shell: bash
       env:
         SUBMODULE_TOKEN: ${{ inputs.token }}
       run: |
+        # Fail rather than reporting the build as skipped-but-fine. Everything downstream
+        # compiles core from lib/, so without this token there is no build and no test run —
+        # yet the workflow used to finish green, because each following step was gated on an
+        # output this one set to false. The token is a 30-day PAT, so it lapses on a schedule,
+        # and the failure it produced was a green tick on a run that compiled nothing.
+        #
+        # Note the asymmetry this removes: an *invalid* token already failed loudly at git
+        # clone, while an *absent* one passed silently. The more complete outage was the
+        # quieter one, which is backwards.
         if [ -z "$SUBMODULE_TOKEN" ]; then
-          echo "available=false" >> "$GITHUB_OUTPUT"
-          echo "::warning::SUBMODULE_TOKEN not set — skipping build and tests."
-          echo "lib/koreth-v1-core is private and cannot be cloned with the default token."
-          exit 0
+          echo "::error::SUBMODULE_TOKEN is not set, so the private lib/koreth-v1-core cannot be cloned and nothing can be built or tested. Failing rather than reporting a green run that compiled nothing."
+          exit 1
         fi
         # Rewrite the SSH remote in .gitmodules to an authenticated HTTPS one.
         # Set globally so it does not end up committed to the checkout.
         git config --global \
           url."https://x-access-token:${SUBMODULE_TOKEN}@github.com/".insteadOf "git@github.com:"
         git submodule update --init --recursive --depth=1
-        echo "available=true" >> "$GITHUB_OUTPUT"
