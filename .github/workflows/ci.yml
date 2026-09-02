@@ -35,8 +35,8 @@ jobs:
           version: v1.7.1
 
       # Formatting only reads src/, test/ and script/, so it needs no submodules. Kept
-      # ahead of the checkout so a formatting error is reported as such rather than being
-      # hidden behind a credential failure.
+      # ahead of the submodule checkout below so a formatting error is reported as such
+      # rather than being hidden behind a credential failure.
       - name: Check formatting
         run: forge fmt --check
 

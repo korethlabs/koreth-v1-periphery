@@ -15,8 +15,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - id: fetch
-      shell: bash
+    - shell: bash
       env:
         SUBMODULE_TOKEN: ${{ inputs.token }}
       run: |
