@@ -34,13 +34,13 @@ jobs:
         with:
           version: v1.7.1
 
-      # Formatting only reads src/, test/ and script/, so it works without the
-      # submodules and stays green even on runs that skip the build below.
+      # Formatting only reads src/, test/ and script/, so it needs no submodules. Kept
+      # ahead of the checkout so a formatting error is reported as such rather than being
+      # hidden behind a credential failure.
       - name: Check formatting
         run: forge fmt --check
 
       - uses: ./.github/actions/checkout-submodules
-        id: submodules
         with:
           token: ${{ secrets.SUBMODULE_TOKEN }}
 
@@ -48,7 +48,6 @@ jobs:
       # the 2-core/7GB runner OOMs without extra headroom. Add swap so solc
       # doesn't get killed.
       - name: Add swap space
-        if: steps.submodules.outputs.available == 'true'
         run: |
           # The runner already has a /swapfile; add a second, larger one on the
           # big /mnt scratch disk rather than colliding with the existing file.
@@ -63,7 +62,6 @@ jobs:
       # from lib/, so a submodule bump invalidates the build even when no file
       # tracked below has changed.
       - name: Cache forge build
-        if: steps.submodules.outputs.available == 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -73,15 +71,13 @@ jobs:
           restore-keys: forge-${{ runner.os }}-
 
       - name: Build (with contract sizes / EIP-170 check)
-        if: steps.submodules.outputs.available == 'true'
         run: forge build --sizes
 
       - name: Unit tests (no fork)
-        if: steps.submodules.outputs.available == 'true'
         run: forge test --match-path "test/unit/**" -vvv
 
   # e2e tests run against a mainnet fork, so they need an RPC endpoint on top of
-  # the submodule token. Skips gracefully when either is missing.
+  # the submodule token. Missing either one fails the job rather than skipping it.
   fork-test:
     name: fork tests
     runs-on: ubuntu-latest
@@ -97,7 +93,6 @@ jobs:
           version: v1.7.1
 
       - uses: ./.github/actions/checkout-submodules
-        id: submodules
         with:
           token: ${{ secrets.SUBMODULE_TOKEN }}
 
@@ -106,7 +101,6 @@ jobs:
       # slots from the provider, which is both slow and the reason a run can die on a single
       # timed-out request. Keyed on the tests because that is what decides which state gets read.
       - name: Cache fork RPC responses
-        if: steps.submodules.outputs.available == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.foundry/cache/rpc
@@ -114,13 +108,18 @@ jobs:
           restore-keys: rpc-${{ runner.os }}-
 
       - name: Fork tests
-        if: steps.submodules.outputs.available == 'true'
         env:
           ETH_RPC_URL: ${{ secrets.ETH_RPC_URL }}
         run: |
+          # Fail rather than skip, for the same reason as the submodule token above and matching
+          # koreth-v1-core's fork job: a job that exits 0 without an endpoint publishes the same
+          # green tick as one that ran the whole e2e suite, so a secret that quietly stops
+          # resolving looks exactly like a passing build. That has already happened in core — two
+          # consecutive green runs executed no fork test at all. This repository is private with
+          # no forks, so no outside contributor is spared a red check by skipping.
           if [ -z "$ETH_RPC_URL" ]; then
-            echo "ETH_RPC_URL secret not set — skipping fork tests."
-            exit 0
+            echo "::error::ETH_RPC_URL is not set, so the e2e fork suite cannot run. Failing rather than reporting a green run that tested nothing."
+            exit 1
           fi
           # A cold cache still means thousands of live requests, so ride out a provider hiccup
           # rather than failing the whole suite on one dropped response.
