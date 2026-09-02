@@ -42,7 +42,7 @@ jobs:
 
       - uses: ./.github/actions/checkout-submodules
         with:
-          token: ${{ secrets.NO_SUCH_SUBMODULE_TOKEN }}
+          token: ${{ secrets.SUBMODULE_TOKEN }}
 
       # via-IR compilation of core (pulled in as a submodule) is memory-hungry;
       # the 2-core/7GB runner OOMs without extra headroom. Add swap so solc
@@ -94,7 +94,7 @@ jobs:
 
       - uses: ./.github/actions/checkout-submodules
         with:
-          token: ${{ secrets.NO_SUCH_SUBMODULE_TOKEN }}
+          token: ${{ secrets.SUBMODULE_TOKEN }}
 
       # The e2e suite pins its fork block, so every run reads the same historical state and the
       # responses can be replayed from disk. Without this each run re-fetches thousands of storage
