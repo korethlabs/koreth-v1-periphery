@@ -20,7 +20,7 @@ jobs:
     name: fmt + build + unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Pinned rather than `stable`, because `forge fmt` is not stable across releases:
       # 1.8.0 changed the indentation of named struct arguments nested inside a chained
@@ -82,7 +82,7 @@ jobs:
     name: fork tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Same version as build-test above. This job does not format, but it does the
       # via-IR compile of core from lib/, and a solc or optimiser difference between the
