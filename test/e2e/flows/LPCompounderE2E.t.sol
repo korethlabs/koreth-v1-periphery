@@ -140,8 +140,11 @@ contract LPCompounderE2E is E2EBase {
         vm.prank(deployer);
         compounder.sweepTokens(Constants.USDC, sweepRecipient, dustAmount);
 
-        uint256 recipientAfter = IERC20(Constants.USDC).balanceOf(sweepRecipient);
-        assertEq(recipientAfter - recipientBefore, dustAmount, "Recipient should receive swept dust");
+        assertEq(
+            IERC20(Constants.USDC).balanceOf(sweepRecipient),
+            recipientBefore + dustAmount,
+            "Recipient should receive swept dust"
+        );
 
         console.log("=== sweepTokens Passed ===");
     }
