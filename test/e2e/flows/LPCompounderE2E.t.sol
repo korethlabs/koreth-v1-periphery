@@ -13,7 +13,12 @@ contract LPCompounderE2E is E2EBase {
     LPCompounder public compounder;
 
     address public keeper = makeAddr("keeper");
-    address public treasury = makeAddr("treasury");
+    /// @notice Destination for the sweepTokens test.
+    /// @dev Deliberately not ForkTestBase's `treasury`. Sweeping dust out of LPCompounder and
+    ///      receiving the protocol's share of compounded fees are two unrelated roles, and while
+    ///      the balance assertion below reads a delta and would survive them being the same
+    ///      address, the equality would be incidental rather than intended.
+    address public sweepRecipient = makeAddr("sweepRecipient");
 
     /// @dev Mirror of LPCompounder.FeesCompounded for vm.expectEmit
     event FeesCompounded(
@@ -123,20 +128,20 @@ contract LPCompounderE2E is E2EBase {
 
     // ========== 4. sweepTokens ==========
 
-    /// @notice If compounder holds dust, deployer can sweep to treasury.
+    /// @notice If compounder holds dust, deployer can sweep it to a chosen recipient.
     function test_sweepTokens() public {
         // Send some USDC dust to the compounder
         uint256 dustAmount = 1000e6;
         _fundUsdc(address(compounder), dustAmount);
 
-        uint256 treasuryBefore = IERC20(Constants.USDC).balanceOf(treasury);
+        uint256 recipientBefore = IERC20(Constants.USDC).balanceOf(sweepRecipient);
 
-        // Deployer sweeps dust to treasury
+        // Deployer sweeps the dust out
         vm.prank(deployer);
-        compounder.sweepTokens(Constants.USDC, treasury, dustAmount);
+        compounder.sweepTokens(Constants.USDC, sweepRecipient, dustAmount);
 
-        uint256 treasuryAfter = IERC20(Constants.USDC).balanceOf(treasury);
-        assertEq(treasuryAfter - treasuryBefore, dustAmount, "Treasury should receive swept dust");
+        uint256 recipientAfter = IERC20(Constants.USDC).balanceOf(sweepRecipient);
+        assertEq(recipientAfter - recipientBefore, dustAmount, "Recipient should receive swept dust");
 
         console.log("=== sweepTokens Passed ===");
     }
