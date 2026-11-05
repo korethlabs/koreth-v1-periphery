@@ -1,39 +1,50 @@
 name: Check out submodules
 description: >
-  Fetch lib/ submodules, including the private koreth-v1-core. Fails when the token
-  is missing, because nothing downstream can compile without core and a run that
-  builds nothing must not report success.
-
-inputs:
-  token:
-    description: >
-      Token with read access to korethlabs/koreth-v1-core. The default GITHUB_TOKEN
-      is scoped to this repository alone and cannot clone a private sibling, so this
-      has to be a separate credential. Required.
-    required: true
+  Fetch the lib/ submodules and prove that koreth-v1-core actually materialised. Every
+  job in this repository compiles core out of lib/, so a checkout that quietly produced
+  an empty submodule directory must fail here rather than hand a later step a missing
+  dependency.
 
 runs:
   using: composite
   steps:
     - shell: bash
-      env:
-        SUBMODULE_TOKEN: ${{ inputs.token }}
       run: |
-        # Fail rather than reporting the build as skipped-but-fine. Everything downstream
-        # compiles core from lib/, so without this token there is no build and no test run —
-        # yet the workflow used to finish green, because each following step was gated on an
-        # output this one set to false. The token is a 30-day PAT, so it lapses on a schedule,
-        # and the failure it produced was a green tick on a run that compiled nothing.
+        set -euo pipefail
+
+        # No credential is configured, and none is needed. Every `url =` in .gitmodules
+        # is an https:// endpoint and koreth-v1-core is a public repository, so an
+        # anonymous fetch resolves all five submodules. This step used to require a
+        # personal access token and rewrite `git@github.com:` to an authenticated HTTPS
+        # prefix; both became inert once the core submodule moved to https://, because
+        # that rewrite then matched no URL in .gitmodules at all. What the token still
+        # did was fail the job when it was unset, which on a public repository means
+        # every pull request from a fork — secrets are not available to those runs.
+        git submodule update --init --recursive --depth=1
+
+        # Assert the post-condition rather than the presence of a credential. The thing
+        # that must hold is that core's sources are on disk; an absent token was only
+        # ever a proxy for that, and a proxy that is now wrong in both directions. A
+        # fetch can also succeed while leaving a submodule path empty, which no check on
+        # an input would catch.
         #
-        # Note the asymmetry this removes: an *invalid* token already failed loudly at git
-        # clone, while an *absent* one passed silently. The more complete outage was the
-        # quieter one, which is backwards.
-        if [ -z "$SUBMODULE_TOKEN" ]; then
-          echo "::error::SUBMODULE_TOKEN is not set, so the private lib/koreth-v1-core cannot be cloned and nothing can be built or tested. Failing rather than reporting a green run that compiled nothing."
+        # Both trees are load-bearing. The src/ file is the obvious dependency. The
+        # test/ one is the easy mistake: this repository's unit tests build on core's
+        # shared helpers and mocks and its e2e suites extend core's E2EBase fixture, so
+        # core's test tree is a compile dependency here and not merely test scaffolding.
+        # A checkout that produced src/ but not test/ would compile and then fail in a
+        # way that looks like a broken test rather than a broken checkout.
+        missing=0
+        for required in \
+          lib/koreth-v1-core/src/core/ProtocolCore.sol \
+          lib/koreth-v1-core/test/e2e/E2EBase.t.sol
+        do
+          if [ ! -f "$required" ]; then
+            echo "::error::$required is missing after the submodule checkout, so nothing here can be built or tested. Failing rather than reporting a green run that compiled nothing."
+            missing=1
+          fi
+        done
+
+        if [ "$missing" -ne 0 ]; then
           exit 1
         fi
-        # Rewrite the SSH remote in .gitmodules to an authenticated HTTPS one.
-        # Set globally so it does not end up committed to the checkout.
-        git config --global \
-          url."https://x-access-token:${SUBMODULE_TOKEN}@github.com/".insteadOf "git@github.com:"
-        git submodule update --init --recursive --depth=1
