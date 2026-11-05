@@ -12,4 +12,9 @@
 	url = https://github.com/foundry-rs/forge-std
 [submodule "lib/koreth-v1-core"]
 	path = lib/koreth-v1-core
-	url = git@github.com:korethlabs/koreth-v1-core
+	# HTTPS, not SSH. `git@github.com:` was workable while both repos were private, because
+	# every clone that mattered carried a key. Once core is public an anonymous clone has
+	# none and an SSH fetch fails outright, so this one line decides whether a stranger can
+	# build this repo at all. The four public dependencies above were already HTTPS for
+	# exactly that reason; this was the only one left behind.
+	url = https://github.com/korethlabs/koreth-v1-core
