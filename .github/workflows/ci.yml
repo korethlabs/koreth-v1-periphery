@@ -36,13 +36,11 @@ jobs:
 
       # Formatting only reads src/, test/ and script/, so it needs no submodules. Kept
       # ahead of the submodule checkout below so a formatting error is reported as such
-      # rather than being hidden behind a credential failure.
+      # rather than being hidden behind a checkout failure.
       - name: Check formatting
         run: forge fmt --check
 
       - uses: ./.github/actions/checkout-submodules
-        with:
-          token: ${{ secrets.SUBMODULE_TOKEN }}
 
       # via-IR compilation of core (pulled in as a submodule) is memory-hungry;
       # the 2-core/7GB runner OOMs without extra headroom. Add swap so solc
@@ -76,8 +74,8 @@ jobs:
       - name: Unit tests (no fork)
         run: forge test --match-path "test/unit/**" -vvv
 
-  # e2e tests run against a mainnet fork, so they need an RPC endpoint on top of
-  # the submodule token. Missing either one fails the job rather than skipping it.
+  # e2e tests run against a mainnet fork, so this job needs an RPC endpoint that the
+  # fork-free job above does not. A missing endpoint fails the job rather than skipping it.
   fork-test:
     name: fork tests
     runs-on: ubuntu-latest
@@ -93,8 +91,6 @@ jobs:
           version: v1.7.1
 
       - uses: ./.github/actions/checkout-submodules
-        with:
-          token: ${{ secrets.SUBMODULE_TOKEN }}
 
       # The e2e suite pins its fork block, so every run reads the same historical state and the
       # responses can be replayed from disk. Without this each run re-fetches thousands of storage
@@ -111,12 +107,15 @@ jobs:
         env:
           ETH_RPC_URL: ${{ secrets.ETH_RPC_URL }}
         run: |
-          # Fail rather than skip, for the same reason as the submodule token above and matching
-          # koreth-v1-core's fork job: a job that exits 0 without an endpoint publishes the same
-          # green tick as one that ran the whole e2e suite, so a secret that quietly stops
-          # resolving looks exactly like a passing build. That has already happened in core — two
-          # consecutive green runs executed no fork test at all. This repository is private with
-          # no forks, so no outside contributor is spared a red check by skipping.
+          # Fail rather than skip, matching koreth-v1-core's fork job: a job that exits 0 without
+          # an endpoint publishes the same green tick as one that ran the whole e2e suite, so a
+          # secret that quietly stops resolving looks exactly like a passing build. That has
+          # already happened in core — two consecutive green runs executed no fork test at all.
+          #
+          # This repository is public, so a pull request from a fork gets no secrets and will go
+          # red here. That is the accepted cost: skipping would restore exactly the false green
+          # this guard exists to prevent, and a red check with a stated reason is easier for a
+          # contributor to act on than a green one that tested nothing.
           if [ -z "$ETH_RPC_URL" ]; then
             echo "::error::ETH_RPC_URL is not set, so the e2e fork suite cannot run. Failing rather than reporting a green run that tested nothing."
             exit 1
