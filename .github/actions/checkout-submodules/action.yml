@@ -24,16 +24,15 @@ runs:
 
         # Assert the post-condition rather than the presence of a credential. The thing
         # that must hold is that core's sources are on disk; an absent token was only
-        # ever a proxy for that, and a proxy that is now wrong in both directions. A
-        # fetch can also succeed while leaving a submodule path empty, which no check on
-        # an input would catch.
+        # ever a proxy for that. `git submodule update` can also exit 0 with the path
+        # absent: it acts on the gitlinks in the tree, so a commit that drops core's
+        # gitlink while .gitmodules still lists it fetches nothing and reports success.
         #
         # Both trees are load-bearing. The src/ file is the obvious dependency. The
         # test/ one is the easy mistake: this repository's unit tests build on core's
         # shared helpers and mocks and its e2e suites extend core's E2EBase fixture, so
         # core's test tree is a compile dependency here and not merely test scaffolding.
-        # A checkout that produced src/ but not test/ would compile and then fail in a
-        # way that looks like a broken test rather than a broken checkout.
+        # Naming the missing path here is clearer than a later unresolved import.
         missing=0
         for required in \
           lib/koreth-v1-core/src/core/ProtocolCore.sol \

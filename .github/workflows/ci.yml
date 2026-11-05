@@ -36,7 +36,7 @@ jobs:
 
       # Formatting only reads src/, test/ and script/, so it needs no submodules. Kept
       # ahead of the submodule checkout below so a formatting error is reported as such
-      # rather than being hidden behind a credential failure.
+      # rather than being hidden behind a checkout failure.
       - name: Check formatting
         run: forge fmt --check
 
@@ -115,8 +115,7 @@ jobs:
           # This repository is public, so a pull request from a fork gets no secrets and will go
           # red here. That is the accepted cost: skipping would restore exactly the false green
           # this guard exists to prevent, and a red check with a stated reason is easier for a
-          # contributor to act on than a green one that tested nothing. Fork contributions are
-          # verified by maintainers re-running the suite on a branch in this repository.
+          # contributor to act on than a green one that tested nothing.
           if [ -z "$ETH_RPC_URL" ]; then
             echo "::error::ETH_RPC_URL is not set, so the e2e fork suite cannot run. Failing rather than reporting a green run that tested nothing."
             exit 1
