@@ -44,4 +44,9 @@ Secrets (RPC key) live in a local `.env` (gitignored) — never commit keys.
 
 ## Security
 
-Unaudited / pre-launch. Do not use in production. Report vulnerabilities to security@koreth.finance.
+Unaudited / pre-launch. Do not use in production.
+
+Report vulnerabilities through GitHub private vulnerability reporting — the **Security**
+tab above, **Report a vulnerability** — and not as a public issue or pull request. See
+[SECURITY.md](./SECURITY.md) for scope, supported versions and what to expect. A finding
+in the core contracts belongs in the `koreth-v1-core` repository instead.
