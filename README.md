@@ -18,10 +18,10 @@ src/
 
 ## Dependency on core
 
-The core is a Foundry dependency (private repo — installed over SSH):
+The core is a git submodule at `lib/koreth-v1-core`, fetched over HTTPS with no credentials:
 
 ```bash
-forge install git@github.com:korethlabs/koreth-v1-core
+git submodule update --init --recursive
 ```
 
 Remapped as `@koreth/v1-core/` (see `remappings.txt`). Contracts import core via
